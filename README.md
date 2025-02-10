@@ -13,17 +13,6 @@ A powerful command-line utility for advanced folder visualization.
 
 ## Features
 
-The following features are planned or in development:
-
-- 🌳 Tree-like folder structure visualization
-- 📋 Batch file operations with structure preservation
-- 🔍 Advanced filtering using regex patterns
-- 🚫 Exclusion patterns for unwanted files/folders
-- 📁 Empty folder handling options
-- 🎨 Customizable output formatting
-
-## Features
-
 - 🌳 Tree-like folder structure visualization
 - 📋 Batch file operations with structure preservation
 - 🔍 Advanced filtering using regex patterns
