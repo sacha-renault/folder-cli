@@ -44,40 +44,6 @@ folder-clip display ./my-project --show-empty
 folder-clip display ./my-project --depth 3
 ```
 
-### Batch Operations
-
-```bash
-# Copy structure while preserving hierarchy
-folder-clip copy ./source ./destination
-
-# Copy with filters
-folder-clip copy ./source ./destination -e "*.tmp|*.log"
-
-# Copy only specific file types
-folder-clip copy ./source ./destination --include "\.rs$|\.toml$"
-```
-
-## Configuration
-
-You can create a `.folder-clip.toml` configuration file in your project root:
-
-```toml
-[display]
-show_empty_folders = false
-max_depth = 5
-
-[filters]
-exclude = [
-    "node_modules",
-    ".git",
-    "target"
-]
-
-[copy]
-preserve_timestamps = true
-overwrite = false
-```
-
 ## Options
 
 ### General Options
