@@ -1,3 +1,13 @@
+//! Tree-like Directory Visualization
+//! 
+//! This module provides functionality to generate and display directory structures
+//! in a tree-like format, similar to the Unix `tree` command.
+//! 
+//! # Features
+//! - Filter files by extension (include or exclude)
+//! - Filter items using regex patterns
+//! - Control visibility of empty folders
+//! - Sort items (folders before files, alphabetically within types)
 
 use std::path::PathBuf;
 use std::fs;
@@ -16,12 +26,31 @@ pub enum FsError {
     EmptyFolder,
 }
 
+/// Represents an item in the file system, either a file or a folder
 #[derive(Debug, PartialEq)]
 pub enum Item {
+    /// A file with its name
     File(String),
+
+    /// A folder with its name, contained items, and a flag indicating if it contains any files
+    /// The bool flag indicates whether this folder contains any terminal files (directly or indirectly)
     Folder(String, Vec<Item>, Option<bool>)
 }
 
+/// Possible errors that can occur during folder structure processing
+impl From<std::io::Error> for FsError {
+    fn from(_: std::io::Error) -> Self {
+        FsError::IoError
+    }
+}
+
+/// Expected configuration structure for folder traversal options
+///
+/// # Fields
+/// * `show_empty_folder` - Whether to include empty folders in the output
+/// * `exclude_extension` - List of file extensions to exclude
+/// * `include_extension_only` - List of file extensions to exclusively include
+/// * `exclude_by_filter` - List of regex patterns for excluding items
 #[derive(Builder)]
 #[builder(build_fn(validate = "Self::validate"))]
 pub struct FolderStructureOptions {
@@ -38,6 +67,14 @@ pub struct FolderStructureOptions {
     show_empty_folder: bool,
 }
 
+/// Validates the configuration options for folder structure.
+///
+/// # Errors
+///
+/// Returns an error if both `exclude_extension` and `include_extension_only` are non-empty,
+/// as these options are mutually exclusive.
+///
+/// Returns `Ok(())` if the validation passes.
 impl FolderStructureOptionsBuilder {
     fn validate(&self) -> Result<(), String> {
         if !self.exclude_extension.as_ref().unwrap_or(&vec![]).is_empty() 
@@ -48,6 +85,44 @@ impl FolderStructureOptionsBuilder {
     }
 }
 
+/// Gets the complete folder structure starting from the given path
+///
+/// # Arguments
+/// * `path` - The starting path to generate the structure from
+/// * `options` - Configuration options for filtering and display
+///
+/// # Returns
+/// * `FsResult<Item>` - The resulting folder structure or an error
+pub fn get_folder_structure(path: &PathBuf, options: &FolderStructureOptions) -> FsResult<Item> {
+    let name = get_path_name(path);
+
+    if path.is_file() {
+        return handle_file(name, options);
+    }
+
+    let items = process_directory(path, options)?;
+    let mut folder = create_folder_item(path, name, items, options)?;
+    update_has_terminal_file(&mut folder);
+    Ok(folder)
+}
+
+/// Prints the complete folder structure as a tree
+///
+/// # Arguments
+/// * `root` - The root item of the structure
+/// * `option` - Configuration options for display
+pub fn print_tree(root: &Item, option: &FolderStructureOptions) {
+    print_structure(root, "", true, option);
+}
+
+/// Determines if a file should be included based on extension filters
+///
+/// # Arguments
+/// * `file_name` - Name of the file to check
+/// * `options` - Filter options containing include/exclude patterns
+///
+/// # Returns
+/// * `bool` - True if the file should be included
 fn should_include_file(file_name: &str, options: &FolderStructureOptions) -> bool {
     // If both vectors are empty, include all files
     if options.exclude_extension.is_empty() && options.include_extension_only.is_empty() {
@@ -69,6 +144,14 @@ fn should_include_file(file_name: &str, options: &FolderStructureOptions) -> boo
     true
 }
 
+/// Determines if an item should be included based on name filters
+///
+/// # Arguments
+/// * `item_name` - Name of the item to check
+/// * `options` - Filter options containing regex patterns
+///
+/// # Returns
+/// * `bool` - True if the item should be included
 fn should_include_item(item_name: &str, options: &FolderStructureOptions) -> bool {
     // If both vectors are empty, include all files
     if options.exclude_by_filter.is_empty() {
@@ -81,25 +164,13 @@ fn should_include_item(item_name: &str, options: &FolderStructureOptions) -> boo
         .any(|re| re.is_match(item_name))
 }
 
-impl From<std::io::Error> for FsError {
-    fn from(_: std::io::Error) -> Self {
-        FsError::IoError
-    }
-}
-
-pub fn get_folder_structure(path: &PathBuf, options: &FolderStructureOptions) -> FsResult<Item> {
-    let name = get_path_name(path);
-
-    if path.is_file() {
-        return handle_file(name, options);
-    }
-
-    let items = process_directory(path, options)?;
-    let mut folder = create_folder_item(path, name, items, options)?;
-    update_has_terminal_file(&mut folder);
-    Ok(folder)
-}
-
+/// Updates the has_terminal_file flag for all folders in the structure
+///
+/// # Arguments
+/// * `item` - The item to update
+///
+/// # Returns
+/// * `bool` - True if this item or any of its children contain a terminal file
 fn update_has_terminal_file(item: &mut Item) -> bool {
     match item {
         Item::File(_) => true,
@@ -111,6 +182,13 @@ fn update_has_terminal_file(item: &mut Item) -> bool {
     }
 }
 
+/// Extracts the name from a path
+///
+/// # Arguments
+/// * `path` - The path to extract the name from
+///
+/// # Returns
+/// * `String` - The extracted name
 fn get_path_name(path: &PathBuf) -> String {
     path.file_name()
         .unwrap_or_default()
@@ -118,6 +196,14 @@ fn get_path_name(path: &PathBuf) -> String {
         .into_owned()
 }
 
+/// Processes a file item
+///
+/// # Arguments
+/// * `name` - Name of the file
+/// * `options` - Configuration options for filtering
+///
+/// # Returns
+/// * `FsResult<Item>` - The file item or a filtered error
 fn handle_file(name: String, options: &FolderStructureOptions) -> FsResult<Item> {
     if should_include_file(&name, options) {
         Ok(Item::File(name))
@@ -126,6 +212,14 @@ fn handle_file(name: String, options: &FolderStructureOptions) -> FsResult<Item>
     }
 }
 
+/// Processes a directory and its contents
+///
+/// # Arguments
+/// * `path` - Path to the directory
+/// * `options` - Configuration options for filtering
+///
+/// # Returns
+/// * `FsResult<Vec<Item>>` - Vector of processed items or an error
 fn process_directory(path: &PathBuf, options: &FolderStructureOptions) -> FsResult<Vec<Item>> {
     let mut items = Vec::new();
     
@@ -148,6 +242,14 @@ fn process_directory(path: &PathBuf, options: &FolderStructureOptions) -> FsResu
     Ok(items)
 }
 
+/// Determines if an entry should be skipped during processing
+///
+/// # Arguments
+/// * `path` - Path to the entry
+/// * `options` - Configuration options for filtering
+///
+/// # Returns
+/// * `bool` - True if the entry should be skipped
 fn should_skip_entry(path: &PathBuf, options: &FolderStructureOptions) -> bool {
     let file_name = path.file_name()
         .and_then(|n| n.to_str());
@@ -160,6 +262,14 @@ fn should_skip_entry(path: &PathBuf, options: &FolderStructureOptions) -> bool {
     }
 }
 
+/// Comparison function for sorting items
+///
+/// # Arguments
+/// * `a` - First item to compare
+/// * `b` - Second item to compare
+///
+/// # Returns
+/// * `Ordering` - The ordering relationship between the items
 fn sort_items(a: &Item, b: &Item) -> Ordering {
     match (a, b) {
         (Item::Folder(name1, ..), Item::Folder(name2, ..)) => name1.cmp(name2),
@@ -169,6 +279,16 @@ fn sort_items(a: &Item, b: &Item) -> Ordering {
     }
 }
 
+/// Creates a folder item with the given contents
+///
+/// # Arguments
+/// * `path` - Path to the folder
+/// * `name` - Name of the folder
+/// * `items` - Contents of the folder
+/// * `options` - Configuration options
+///
+/// # Returns
+/// * `FsResult<Item>` - The folder item or an error
 fn create_folder_item(path: &PathBuf, name: String, items: Vec<Item>, options: &FolderStructureOptions) -> FsResult<Item> {
     if items.is_empty() && !options.show_empty_folder {
         return Err(FsError::EmptyFolder);
@@ -183,7 +303,13 @@ fn create_folder_item(path: &PathBuf, name: String, items: Vec<Item>, options: &
     Ok(Item::Folder(folder_name, items, None))
 }
 
-// Helper function to print the structure
+/// Prints a single item in the structure with proper formatting
+///
+/// # Arguments
+/// * `item` - The item to print
+/// * `prefix` - Current line prefix for proper tree formatting
+/// * `is_last` - Whether this is the last item in its level
+/// * `option` - Configuration options for display
 fn print_structure(item: &Item, prefix: &str, is_last: bool, option: &FolderStructureOptions) {
     let marker = if is_last { "└── " } else { "├── " };
     let next_prefix = if is_last { "    " } else { "│   " };
@@ -221,9 +347,4 @@ fn print_structure(item: &Item, prefix: &str, is_last: bool, option: &FolderStru
             }
         }
     }
-}
-
-// Helper function to start the printing from root
-pub fn print_tree(root: &Item, option: &FolderStructureOptions) {
-    print_structure(root, "", true, option);
 }
