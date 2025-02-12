@@ -1,7 +1,6 @@
 
 use std::path::PathBuf;
 use std::fs;
-use std::io::Error;
 use std::cmp::Ordering;
 
 use derive_builder::Builder;
@@ -12,7 +11,7 @@ type FsResult<T> = Result<T, FsError>;
 // Custom error type to avoid using std::io::Error
 #[derive(Debug)]
 pub enum FsError {
-    IoError(Error),
+    IoError,
     Filtered,
     EmptyFolder,
 }
@@ -20,7 +19,7 @@ pub enum FsError {
 #[derive(Debug, PartialEq)]
 pub enum Item {
     File(String),
-    Folder(String, Vec<Item>)
+    Folder(String, Vec<Item>, Option<bool>)
 }
 
 #[derive(Builder)]
@@ -83,8 +82,8 @@ fn should_include_item(item_name: &str, options: &FolderStructureOptions) -> boo
 }
 
 impl From<std::io::Error> for FsError {
-    fn from(error: std::io::Error) -> Self {
-        FsError::IoError(error)
+    fn from(_: std::io::Error) -> Self {
+        FsError::IoError
     }
 }
 
@@ -96,7 +95,20 @@ pub fn get_folder_structure(path: &PathBuf, options: &FolderStructureOptions) ->
     }
 
     let items = process_directory(path, options)?;
-    create_folder_item(path, name, items, options)
+    let mut folder = create_folder_item(path, name, items, options)?;
+    update_has_terminal_file(&mut folder);
+    Ok(folder)
+}
+
+fn update_has_terminal_file(item: &mut Item) -> bool {
+    match item {
+        Item::File(_) => true,
+        Item::Folder(_, items, has_terminal) => {
+            let contains_terminal = items.iter_mut().any(|item| update_has_terminal_file(item));
+            *has_terminal = Some(contains_terminal);
+            contains_terminal
+        }
+    }
 }
 
 fn get_path_name(path: &PathBuf) -> String {
@@ -150,9 +162,9 @@ fn should_skip_entry(path: &PathBuf, options: &FolderStructureOptions) -> bool {
 
 fn sort_items(a: &Item, b: &Item) -> Ordering {
     match (a, b) {
-        (Item::Folder(name1, _), Item::Folder(name2, _)) => name1.cmp(name2),
-        (Item::Folder(_, _), Item::File(_)) => Ordering::Less,
-        (Item::File(_), Item::Folder(_, _)) => Ordering::Greater,
+        (Item::Folder(name1, ..), Item::Folder(name2, ..)) => name1.cmp(name2),
+        (Item::Folder(..), Item::File(..)) => Ordering::Less,
+        (Item::File(..), Item::Folder(..)) => Ordering::Greater,
         (Item::File(name1), Item::File(name2)) => name1.cmp(name2),
     }
 }
@@ -168,7 +180,7 @@ fn create_folder_item(path: &PathBuf, name: String, items: Vec<Item>, options: &
         name 
     };
 
-    Ok(Item::Folder(folder_name, items))
+    Ok(Item::Folder(folder_name, items, None))
 }
 
 // Helper function to print the structure
@@ -180,9 +192,9 @@ fn print_structure(item: &Item, prefix: &str, is_last: bool, option: &FolderStru
         Item::File(name) => {
             println!("{}{}{}", prefix, marker, name);
         }
-        Item::Folder(name, items) => {
+        Item::Folder(name, items, has_terminal_file) => {
             // Skip empty folders if show_empty_folder is false
-            if option.show_empty_folder && items.is_empty() {
+            if !option.show_empty_folder && !has_terminal_file.unwrap_or(false) {
                 return;
             }
 
